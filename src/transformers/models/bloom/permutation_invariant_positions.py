@@ -146,7 +146,7 @@ def _get_action_invariant_positions(
     init_position = positions[edge_sequence[0][0].start_idx].item()
     new_positions = positions.clone()
     element_position = defaultdict(lambda: -1)
-    for sequenced_edge in edge_sequence:
+    for idx, sequenced_edge in enumerate(edge_sequence):
         pred_node, edge, succ_node = sequenced_edge
         pred_bias = (
             init_position if element_position[pred_node.ids] < 0
@@ -163,7 +163,8 @@ def _get_action_invariant_positions(
             new_positions[succ_node.start_idx:succ_node.end_idx] = (
                 new_positions[edge.end_idx - 1] + 1 + torch.arange(succ_node.length).to(device)
             )
-        after_edge_pos = new_positions[succ_node.end_idx - 1] + 1
+        if idx != len(edge_sequence) - 1:
+            after_edge_pos = new_positions[succ_node.end_idx - 1] + 1
         if pred_node.token in graph_tokens['gen_node']:
             element_position[pred_node.ids] = after_edge_pos.item()
         if isinstance(succ_node, SequenceElement) and succ_node.token in graph_tokens['gen_node']:
