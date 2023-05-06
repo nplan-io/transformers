@@ -25,6 +25,7 @@ def build_message_passing_matrices(
         for edge_idx, sequenced_edge in enumerate(edge_sequence):
             pred_node, edge, succ_node = sequenced_edge
             node2edge_idxs[pred_node.ids].append(edge_idx)
+            message_passing_dict['edges2tokens'].append([edge_idx, pred_node.start_idx])
             if isinstance(succ_node, SequenceElement):
                 end_idx = succ_node.end_idx
                 node2edge_idxs[succ_node.ids].append(edge_idx)
@@ -34,27 +35,20 @@ def build_message_passing_matrices(
                 end_idx = pred_node.end_idx
             for token_idx in range(pred_node.start_idx, end_idx):
                 message_passing_dict['tokens2edges'].append([token_idx, edge_idx])
-                message_passing_dict['edges2tokens'].append([edge_idx, token_idx])
         if len(message_passing_dict['edges2tokens']) > 0:
             message_passing_dict['edges2tokens'] = add_missing_idxs(
                 message_passing_dict['edges2tokens'],
                 num_incoming_nodes=len(edge_sequence),
                 num_outgoing_nodes=len(t_ids)
             )
-        message_passing_dict['inverse_edge_index'] = []
+        message_passing_dict['edge_index'] = []
         for edge_idxs in node2edge_idxs.values():
             if len(edge_idxs) < 2:
                 continue
             for (idx0, idx1) in itertools.combinations(list(set(edge_idxs)), 2):
-                message_passing_dict['inverse_edge_index'].append(
+                message_passing_dict['edge_index'].append(
                     [idx0, idx1] if idx0 < idx1 else [idx1, idx0]
                 )
-        if len(message_passing_dict['inverse_edge_index']) > 0:
-            message_passing_dict['inverse_edge_index'] = add_missing_idxs(
-                message_passing_dict['inverse_edge_index'],
-                num_incoming_nodes=len(edge_sequence),
-                num_outgoing_nodes=len(edge_sequence)
-            )
         message_passing_dicts.append({
             key: torch.from_numpy(np.array(value).transpose(1, 0)).long().to(token_ids.device)
             if len(value) > 0 else torch.from_numpy(np.array(value)).long().to(token_ids.device)
@@ -83,7 +77,7 @@ def add_missing_idxs(
 def perform_causal_message_passing(
     token_embeddings: torch.Tensor,
     message_passing_dicts: List[Dict[str, torch.Tensor]],
-    linear_layer: Optional[Callable] = None,
+    gnn_layer: Callable,
     reduce: str = 'mean'
 ) -> torch.Tensor:
     """ Returns token embeddings in a sequence where causal message passing has been performed on
@@ -91,42 +85,31 @@ def perform_causal_message_passing(
     """
     new_token_embeddings = []
     for t_embeddings, message_passing_dict in zip(token_embeddings, message_passing_dicts):
-        if message_passing_dict['inverse_edge_index'].numel() == 0:
-            new_t_embeddings = t_embeddings
+        edge_embeddings = scatter(
+            src=t_embeddings[message_passing_dict['tokens2edges'][0]],
+            dim=0,
+            index=message_passing_dict['tokens2edges'][1],
+            reduce=reduce
+        )
+        if message_passing_dict['edge_index'].numel() > 0:
+            edge_embeddings = gnn_layer(edge_embeddings, message_passing_dict['edge_index'])
+        if edge_embeddings.shape[0] > 1:
+            causal_edge_embeddings = torch.cat([
+                    torch.zeros_like(edge_embeddings[0]).unsqueeze(0),
+                    edge_embeddings[:-1],
+                    torch.zeros_like(edge_embeddings[0]).unsqueeze(0)
+            ], dim=0)
         else:
-            edge_embeddings = scatter(
-                src=t_embeddings[message_passing_dict['tokens2edges'][0]],
-                dim=0,
-                index=message_passing_dict['tokens2edges'][1],
-                reduce=reduce
-            )
-            # adding dummy tensor to make sure that the output tensor of message passing is the
-            # correct size because causal message passing does not allow self loops
-            edge_embeddings = torch.cat([
-                edge_embeddings,
-                torch.zeros_like(edge_embeddings[0].unsqueeze(0))
+            causal_edge_embeddings = torch.cat([
+                    torch.zeros_like(edge_embeddings[0]).unsqueeze(0),
+                    torch.zeros_like(edge_embeddings[0]).unsqueeze(0)
             ], dim=0)
-            # adding dummy tensor to make sure that the output tensor of message passing is the
-            # correct size because causal message passing does not allow self loops
-            edge_embeddings = scatter(
-                src=edge_embeddings[message_passing_dict['inverse_edge_index'][0]],
-                dim=0,
-                index=message_passing_dict['inverse_edge_index'][1],
-                reduce=reduce
-            )
-            if linear_layer is not None:
-                edge_embeddings = linear_layer(edge_embeddings)
-                edge_embeddings = torch.relu(edge_embeddings)
-            edge_embeddings = torch.cat([
-                edge_embeddings,
-                torch.zeros_like(edge_embeddings[0].unsqueeze(0))
-            ], dim=0)
-            new_t_embeddings = scatter(
-                src=edge_embeddings[message_passing_dict['edges2tokens'][0]],
-                dim=0,
-                index=message_passing_dict['edges2tokens'][1],
-                reduce=reduce
-            )
+        new_t_embeddings = scatter(
+            src=causal_edge_embeddings[message_passing_dict['edges2tokens'][0]],
+            dim=0,
+            index=message_passing_dict['edges2tokens'][1],
+            reduce=reduce
+        )
         assert new_t_embeddings.shape == t_embeddings.shape
         new_token_embeddings.append(new_t_embeddings.unsqueeze(0))
-    return torch.cat(new_token_embeddings, dim=0) + token_embeddings
+    return token_embeddings + torch.cat(new_token_embeddings, dim=0)

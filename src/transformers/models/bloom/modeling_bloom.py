@@ -587,7 +587,7 @@ class BloomModel(BloomPreTrainedModel):
         self.graph_tokens = {}
         self.position_type = "normal"
         self.message_passing_type = "none"
-        self.linear_layers = []
+        self.gnn_layers = []
 
         # Embedding + LN Embedding
         self.word_embeddings = nn.Embedding(config.vocab_size, self.embed_dim)
@@ -789,11 +789,7 @@ class BloomModel(BloomPreTrainedModel):
                 hidden_states = perform_causal_message_passing(
                     hidden_states,
                     message_passing_dicts,
-                    linear_layer=(
-                        self.linear_layers[i]
-                        if (i < len(self.linear_layers) and self.message_passing_type == 'naive')
-                        else None
-                    )
+                    gnn_layer=self.gnn_layers[i]
                 )
 
             if use_cache is True:
@@ -853,7 +849,8 @@ class BloomForCausalLM(BloomPreTrainedModel):
     ) -> dict:
         # only last token for input_ids if past is not None
         truncated_input_ids = input_ids
-        if past_key_values:
+        # past_key_values = None
+        if None:
             truncated_input_ids = input_ids[:, -1].unsqueeze(-1)
 
             # the cache may be in the stardard format (e.g. in contrastive search), convert to bloom's format if needed
@@ -861,17 +858,17 @@ class BloomForCausalLM(BloomPreTrainedModel):
                 past_key_values = self._convert_to_bloom_cache(past_key_values)
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
-            model_inputs = {"inputs_embeds": inputs_embeds}
-        else:
-            model_inputs = {"input_ids": truncated_input_ids}
+        # if inputs_embeds is not None and past_key_values is None:
+        #     model_inputs = {"inputs_embeds": inputs_embeds}
+        # else:
+        model_inputs = {"input_ids": truncated_input_ids}
 
         model_inputs.update(
             {
-                "past_key_values": past_key_values,
+                "past_key_values": None,
                 "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
-                "full_input_ids": input_ids,
+                # "full_input_ids": input_ids,
             }
         )
         return model_inputs
