@@ -37,7 +37,7 @@ from ...utils import logging
 from .configuration_bloom import BloomConfig
 from .desequence_graph_ids import extract_edge_sequence, SequenceElement
 from .permutation_invariant_positions import build_alibi_tensor
-from .causal_message_passing import build_message_passing_matrices, perform_causal_message_passing
+from .causal_message_passing import build_message_passing_matrices, CausalMessagePassingLayer
 
 
 logger = logging.get_logger(__name__)
@@ -587,7 +587,7 @@ class BloomModel(BloomPreTrainedModel):
         self.graph_tokens = {}
         self.position_type = "normal"
         self.message_passing_type = "none"
-        self.gnn_layers = []
+        self.dropout_layer = torch.nn.Dropout(p=0.5)
 
         # Embedding + LN Embedding
         self.word_embeddings = nn.Embedding(config.vocab_size, self.embed_dim)
@@ -649,6 +649,12 @@ class BloomModel(BloomPreTrainedModel):
 
     def set_input_embeddings(self, new_embeddings: torch.Tensor):
         self.word_embeddings = new_embeddings
+
+    def init_message_passing(self, gnn_type: str):
+        self.causal_gnn_layers = torch.nn.ModuleList(
+            [CausalMessagePassingLayer(gnn_type, self.config.hidden_size)
+             for _ in range(self.config.n_layer)
+        ])
 
     @add_start_docstrings_to_model_forward(BLOOM_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
@@ -751,7 +757,7 @@ class BloomModel(BloomPreTrainedModel):
             input_shape=(batch_size, seq_length),
             past_key_values_length=past_key_values_length,
         )
-
+        perform_message_passing = self.dropout_layer(torch.ones((1)).to(self.device)).bool().item()
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -785,11 +791,14 @@ class BloomModel(BloomPreTrainedModel):
                 )
 
             hidden_states = outputs[0]
-            if i != len(self.h) - 1 and self.message_passing_type != 'none':
-                hidden_states = perform_causal_message_passing(
+            if (
+                i != len(self.h) - 1
+                and self.message_passing_type != 'none'
+                and perform_message_passing
+            ):
+                hidden_states = self.causal_gnn_layers[i](
                     hidden_states,
-                    message_passing_dicts,
-                    gnn_layer=self.gnn_layers[i]
+                    message_passing_dicts
                 )
 
             if use_cache is True:
