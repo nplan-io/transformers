@@ -757,7 +757,6 @@ class BloomModel(BloomPreTrainedModel):
             input_shape=(batch_size, seq_length),
             past_key_values_length=past_key_values_length,
         )
-        perform_message_passing = self.dropout_layer(torch.ones((1)).to(self.device)).bool().item()
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -794,7 +793,6 @@ class BloomModel(BloomPreTrainedModel):
             if (
                 i != len(self.h) - 1
                 and self.message_passing_type != 'none'
-                and perform_message_passing
             ):
                 hidden_states = self.causal_gnn_layers[i](
                     hidden_states,
