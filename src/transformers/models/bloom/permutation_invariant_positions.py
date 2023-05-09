@@ -6,6 +6,7 @@ from collections import defaultdict
 import math
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 
 from .desequence_graph_ids import SequenceElement
@@ -135,39 +136,88 @@ def _remove_positions_from_graph_tokens(
 
 def _get_action_invariant_positions(
     positions: torch.Tensor,
-    edge_sequence: List[Tuple[SequenceElement, Optional[SequenceElement], Optional[SequenceElement]]],
-    graph_tokens: Dict[str, List[int]]
+    edge_sequence: List[Tuple[SequenceElement, Optional[SequenceElement], Optional[SequenceElement]]]
 ) -> torch.Tensor:
     """ Returns a revised position tensor where the position of tokens in a graph sequence reflect
         the order in which they can be generated, i.e. some edges can be generated at the same time
         so they will have similar positions
     """
-    device = positions.device
-    init_position = positions[edge_sequence[0][0].start_idx].item()
-    new_positions = positions.clone()
+    position_vector = positions[:edge_sequence[0][0].start_idx].tolist()
     element_position = defaultdict(lambda: -1)
+    new_positions = [position_vector[:] for _ in range(edge_sequence[0][0].start_idx)]
     for sequenced_edge in edge_sequence:
         pred_node, edge, succ_node = sequenced_edge
-        pred_bias = (
-            init_position if element_position[pred_node.ids] < 0
-            else element_position[pred_node.ids]
-        )
-        new_positions[pred_node.start_idx:pred_node.end_idx] = (
-            pred_bias + torch.arange(pred_node.length).to(device)
-        )
-        after_edge_pos = new_positions[pred_node.end_idx - 1] + 1
-        if isinstance(edge, SequenceElement):
-            new_positions[edge.start_idx:edge.end_idx] = (
-                new_positions[pred_node.end_idx - 1] + 1 + torch.arange(edge.length).to(device)
-            )
-            after_edge_pos = new_positions[edge.end_idx - 1] + 1
-        if isinstance(edge, SequenceElement) and isinstance(succ_node, SequenceElement):
-            new_positions[succ_node.start_idx:succ_node.end_idx] = (
-                new_positions[edge.end_idx - 1] + 1 + torch.arange(succ_node.length).to(device)
-            )
-            after_edge_pos = new_positions[succ_node.end_idx - 1] + 1
-        if pred_node.token in graph_tokens['gen_node']:
-            element_position[pred_node.ids] = after_edge_pos.item()
-        if isinstance(succ_node, SequenceElement) and succ_node.token in graph_tokens['gen_node']:
-            element_position[succ_node.ids] = after_edge_pos.item()
+        position_vector += list(range(
+            max(position_vector) + 1,
+            max(position_vector) + 1 + pred_node.length
+        ))
+        new_positions += pred_node.length * position_vector[:]
+        if not isinstance(edge, SequenceElement):
+            continue
+        if element_position[pred_node.ids] > 0:
+            position_vector = position_vector[:pred_node.start_idx]
+            position_vector += list(range(
+                element_position[pred_node.ids],
+                pred_node.length + element_position[pred_node.ids]
+            ))
+        position_vector += list(range(
+            position_vector[-1] + 1,
+            position_vector[-1] + 1 + edge.length
+        ))
+        new_positions += edge.length * position_vector[:]
+        if not isinstance(succ_node, SequenceElement):
+            continue
+        position_vector += list(range(
+            position_vector[-1] + 1,
+            position_vector[-1] + 1 + succ_node.length
+        ))
+        new_positions += succ_node.length * position_vector[:]
+        if element_position[pred_node.ids] < -1:
+            element_position[pred_node.ids] = position_vector[-1] + 1
+        if element_position[succ_node.ids] < -1:
+            element_position[succ_node.ids] = position_vector[-1] + 1
+    length = positions.numel()
+    new_positions += [[0] * length for _ in range(length - len(new_positions[-1]))]
+    new_positions = [n_pos + (length - len(n_pos)) * [0] for n_pos in new_positions]
+    new_positions = torch.from_numpy(np.array(new_positions)).long().to(positions.device)
+    return new_positions.unsqueeze(0)
+
+
+def _get_all_edge_previous_positions(
+    positions: torch.Tensor,
+    edge_sequence: List[Tuple[SequenceElement, Optional[SequenceElement], Optional[SequenceElement]]]
+) -> torch.Tensor:
+    """ Returns a revised position tensor where the position of tokens in a graph sequence reflect
+        the order in which they can be generated, i.e. some edges can be generated at the same time
+        so they will have similar positions
+    """
+    text_positions = positions[:edge_sequence[0][0].start_idx].tolist()
+    new_positions = [text_positions[:] for _ in range(edge_sequence[0][0].start_idx)]
+    previous_lengths = []
+    for sequenced_edge in edge_sequence:
+        pred_node, edge, succ_node = sequenced_edge
+        start_idx = pred_node.start_idx
+        if isinstance(succ_node, SequenceElement):
+            end_idx = succ_node.end_idx
+        elif isinstance(edge, SequenceElement):
+            end_idx = edge.end_idx
+        else:
+            end_idx = pred_node.end_idx
+        current_length = end_idx - start_idx
+        position_vector = text_positions[:]
+        for previous_length in previous_lengths:
+            positon_vector += list(range(
+                text_positions[-1] + max(previous_lengths) - previous_length,
+                text_positions[-1] + max(previous_lengths)
+            ))
+        position_vector += list(range(
+            text_positions[-1] + max(previous_lengths),
+            text_positions[-1] + max(previous_lengths) + current_length
+        ))
+        previous_lengths.append(current_length)
+        new_positions += current_length * position_vector[:]
+    length = positions.numel()
+    new_positions += [[0] * length for _ in range(length - len(new_positions[-1]))]
+    new_positions = [n_pos + (length - len(n_pos)) * [0] for n_pos in new_positions]
+    new_positions = torch.from_numpy(np.array(new_positions)).long().to(positions.device)
     return new_positions.unsqueeze(0)
