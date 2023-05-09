@@ -95,7 +95,7 @@ def graph_cross_attention(
     query_representations: torch.Tensor,
     edge_index: torch.Tensor
 ) -> torch.Tensor:
-    """ Performs graph attention on a set of prior probabilities using the representation of each
+    """ Performs graph attention on a set of prior probabilities uing the representation of each
         node in the graph to calculate the attention weights. The implemented attention is dot
         product attention as implemented in the transformer architecture
     """
