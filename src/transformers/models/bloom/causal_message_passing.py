@@ -103,8 +103,8 @@ def graph_cross_attention(
         np.sqrt([key_representations.size(1)])
     ).to(key_representations.device)
     dot_products = (
-        query_representations[edge_index[0]]
-        * key_representations[edge_index[1]]
+        query_representations[edge_index[1]]
+        * key_representations[edge_index[0]]
     ).sum(1) / scaling_constant
     weights = scatter_softmax(src=dot_products, index=edge_index[1], dim=0)
     weighted_probs = weights.unsqueeze(1) * values[edge_index[0]]
@@ -117,8 +117,8 @@ class CausalMessagePassingLayer(torch.nn.Module):
         self.gnn_layer = GNNLayerFactory[gnn_type].value(embedding_size, embedding_size)
         self.gating_parameter_a = torch.nn.Parameter(torch.zeros(1))
         self.gating_parameter_b = torch.nn.Parameter(torch.zeros(1))
-        self.key_embedder = torch.Linear(embedding_size, 64)
-        self.query_embedder = torch.Linear(embedding_size, 64)
+        self.key_embedder = torch.nn.Linear(embedding_size, 64)
+        self.query_embedder = torch.nn.Linear(embedding_size, 64)
         self.linear_layer = torch.nn.Linear(embedding_size, embedding_size)
 
     def forward(
@@ -134,19 +134,16 @@ class CausalMessagePassingLayer(torch.nn.Module):
             graph_attention_embeddings = torch.zeros_like(t_embeddings)
             if message_passing_dict['edges2tokens'].numel() > 0:
                 start_idx, end_idx = message_passing_dict['slice_idxs']
-                graph_attention_embeddings[start_idx, end_idx] = graph_cross_attention(
+                graph_attention_embeddings[start_idx:end_idx] = graph_cross_attention(
                     values=edge_embeddings,
                     key_representations=self.key_embedder(edge_embeddings),
                     query_representations=self.query_embedder(t_embeddings),
                     edge_index=message_passing_dict['edges2tokens']
-                )
+                )[start_idx:]
             new_t_embeddings = t_embeddings + (torch.tanh(self.gating_parameter_a) * graph_attention_embeddings)
-            new_t_embeddings = (
-                new_t_embeddings
-                + (torch.tanh(self.gating_parameter_b) * self.linear_layer(new_t_embeddings))
-            )
+            new_t_embeddings = new_t_embeddings + (torch.tanh(self.gating_parameter_b) * self.linear_layer(new_t_embeddings))
             new_token_embeddings.append(new_t_embeddings.unsqueeze(0))
-        return token_embeddings + torch.cat(new_token_embeddings, dim=0)
+        return torch.cat(new_token_embeddings, dim=0)
 
 # def perform_causal_message_passing(
 #     token_embeddings: torch.Tensor,
