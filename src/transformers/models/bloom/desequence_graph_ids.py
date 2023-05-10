@@ -39,7 +39,6 @@ def extract_edge_sequence(
         edges.append((sequence[-2], sequence[-1], None))
     elif len(sequence) > 0 and sequence[-1].token == graph_tokens['gen_edge']:
         edges.append((sequence[-1], None, None))
-    assert len(edges) > 0
     return edges
 
 
@@ -50,6 +49,8 @@ def _extract_graph_elements(
     """ Returns a parsable representation of the serialized graph in a sequence of token ids,
         if none is found, returns an empty list
     """
+    if len(graph_tokens) == 0:
+        return []
     sequence = []
     prev_token_id, prev_idx, final_idx = None, -1, len(token_ids)
     for token_idx, token_id in enumerate(token_ids):
