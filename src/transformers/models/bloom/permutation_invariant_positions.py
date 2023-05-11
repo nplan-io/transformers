@@ -67,12 +67,18 @@ def build_alibi_tensor(
         arange_tensor
     ):
         token_positions.append(
-            _get_graph_positions(t_ids, edge_sequence, mask, positions, graph_tokens, position_type)
+            _get_graph_positions(t_ids, edge_sequence, mask, positions, position_type)
         )
-    alibi = slopes[..., None] * torch.cat(token_positions, dim=0)
+    try:
+        alibi = (
+            slopes.tile([token_ids.shape[0]]).unsqueeze(1).unsqueeze(2)
+            * torch.cat(token_positions, dim=0).tile([num_heads, 1, 1])
+        )
+    except:
+        import pdb;pdb.set_trace()
     return alibi.reshape(
         batch_size * num_heads,
-        seq_length if position_type == 'all_edges_previous' else 1,
+        seq_length if position_type in ['all_edges_previous', 'action_invariant']  else 1,
         seq_length
     ).to(dtype)
 
@@ -82,7 +88,6 @@ def _get_graph_positions(
     edge_sequence: List[Tuple[SequenceElement, Optional[SequenceElement], Optional[SequenceElement]]],
     mask: torch.Tensor,
     positions: torch.Tensor,
-    graph_tokens: Dict[str, List[int]],
     position_type: str
 ) -> torch.Tensor:
     """ Returns a revised position tenso where the position of tokens in the
@@ -99,8 +104,12 @@ def _get_graph_positions(
         if position_type == 'action_invariant':
             new_positions = _get_action_invariant_positions(
                 positions=positions[0],
-                edge_sequence=edge_sequence,
-                graph_tokens=graph_tokens,
+                edge_sequence=edge_sequence
+            ) * mask
+        elif position_type == 'all_edges_previous':
+            new_positions = _get_all_edge_previous_positions(
+                positions=positions[0],
+                edge_sequence=edge_sequence
             ) * mask
         elif position_type == 'no_positions':
             new_positions = _remove_positions_from_graph_tokens(
@@ -151,7 +160,7 @@ def _get_action_invariant_positions(
             max(position_vector) + 1,
             max(position_vector) + 1 + pred_node.length
         ))
-        new_positions += pred_node.length * position_vector[:]
+        new_positions += [position_vector[:] for _ in range(pred_node.length)]
         if not isinstance(edge, SequenceElement):
             continue
         if element_position[pred_node.ids] > 0:
@@ -164,14 +173,14 @@ def _get_action_invariant_positions(
             position_vector[-1] + 1,
             position_vector[-1] + 1 + edge.length
         ))
-        new_positions += edge.length * position_vector[:]
+        new_positions += [position_vector[:] for _ in range(edge.length)]
         if not isinstance(succ_node, SequenceElement):
             continue
         position_vector += list(range(
             position_vector[-1] + 1,
             position_vector[-1] + 1 + succ_node.length
         ))
-        new_positions += succ_node.length * position_vector[:]
+        new_positions += [position_vector[:] for _ in range(succ_node.length)]
         if element_position[pred_node.ids] < -1:
             element_position[pred_node.ids] = position_vector[-1] + 1
         if element_position[succ_node.ids] < -1:
@@ -180,7 +189,7 @@ def _get_action_invariant_positions(
     new_positions += [[0] * length for _ in range(length - len(new_positions[-1]))]
     new_positions = [n_pos + (length - len(n_pos)) * [0] for n_pos in new_positions]
     new_positions = torch.from_numpy(np.array(new_positions)).long().to(positions.device)
-    return new_positions.unsqueeze(0)
+    return new_positions
 
 
 def _get_all_edge_previous_positions(
@@ -205,19 +214,20 @@ def _get_all_edge_previous_positions(
             end_idx = pred_node.end_idx
         current_length = end_idx - start_idx
         position_vector = text_positions[:]
+        max_length = max(previous_lengths) if len(previous_lengths) > 0 else 0
         for previous_length in previous_lengths:
-            positon_vector += list(range(
-                text_positions[-1] + max(previous_lengths) - previous_length,
-                text_positions[-1] + max(previous_lengths)
+            position_vector += list(range(
+                text_positions[-1] + 1 + max_length - previous_length,
+                text_positions[-1] + 1 + max_length
             ))
         position_vector += list(range(
-            text_positions[-1] + max(previous_lengths),
-            text_positions[-1] + max(previous_lengths) + current_length
+            text_positions[-1] + 1 + max_length,
+            text_positions[-1] + 1 + max_length + current_length
         ))
         previous_lengths.append(current_length)
-        new_positions += current_length * position_vector[:]
+        new_positions += [position_vector[:] for _ in range(current_length)]
     length = positions.numel()
     new_positions += [[0] * length for _ in range(length - len(new_positions[-1]))]
     new_positions = [n_pos + (length - len(n_pos)) * [0] for n_pos in new_positions]
     new_positions = torch.from_numpy(np.array(new_positions)).long().to(positions.device)
-    return new_positions.unsqueeze(0)
+    return new_positions
