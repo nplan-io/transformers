@@ -69,13 +69,10 @@ def build_alibi_tensor(
         token_positions.append(
             _get_graph_positions(t_ids, edge_sequence, mask, positions, position_type)
         )
-    try:
-        alibi = (
-            slopes.tile([token_ids.shape[0]]).unsqueeze(1).unsqueeze(2)
-            * torch.cat(token_positions, dim=0).tile([num_heads, 1, 1])
-        )
-    except:
-        import pdb;pdb.set_trace()
+    alibi = (
+        slopes.tile([token_ids.shape[0]]).unsqueeze(1).unsqueeze(2)
+        * torch.cat(token_positions, dim=0).tile([num_heads, 1, 1])
+    )
     return alibi.reshape(
         batch_size * num_heads,
         seq_length if position_type in ['all_edges_previous', 'action_invariant']  else 1,
