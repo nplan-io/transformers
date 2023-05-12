@@ -50,7 +50,7 @@ class GatedGraphCrossAttentionLayer(torch.nn.Module):
         have been serialized in a sequence of tokens and the token sequence
 
         a key element of this layer is that it enforces that information about elements in the graph
-        can only be passed to later tokens describing later elements in the sequence
+        can only be passed to tokens describing later elements in the sequence
 
         This layer contains methods to pass information either between nodes or edges within
         the serialized graph
