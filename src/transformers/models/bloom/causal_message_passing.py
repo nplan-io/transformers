@@ -253,8 +253,7 @@ class GatedGraphCrossAttentionLayer(torch.nn.Module):
         array_dict: Dict[str, Union[List[int], List[List[int]]]],
         device: torch.device
     ) -> Dict[str, torch.Tensor]:
-        """ Converts a dictionary of lists of integers to a dictionary of torch Tensor and returns
-            its
+        """ Converts a dictionary of lists of integers to a dictionary of torch Tensor and returns it
         """
         for key, array in array_dict.items():
             if len(array) == 0 or isinstance(array[0], int):
