@@ -90,7 +90,7 @@ class GatedGraphCrossAttentionLayer(torch.nn.Module):
                     edge_index=message_passing_dict['elements2tokens']
                 )[start_idx:]
             new_t_embeddings = t_embeddings + torch.tanh(self.gating_message_passing) * new_t_embeddings
-            new_t_embeddings = new_t_embeddings + torch.tanh(self.gating_linear) * new_t_embeddings
+            new_t_embeddings = new_t_embeddings + torch.tanh(self.gating_linear) * self.linear_layer(new_t_embeddings)
             new_token_embeddings.append(new_t_embeddings.unsqueeze(0))
         return torch.cat(new_token_embeddings, dim=0)
 
