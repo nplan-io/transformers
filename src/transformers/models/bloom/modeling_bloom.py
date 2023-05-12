@@ -39,7 +39,6 @@ from .desequence_graph_ids import extract_edge_sequence, SequenceElement
 from .permutation_invariant_positions import build_alibi_tensor
 from .causal_message_passing import GatedGraphCrossAttentionLayer
 
-
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "bigscience/bloom-560m"
@@ -586,6 +585,7 @@ class BloomModel(BloomPreTrainedModel):
         self.num_heads = config.n_head
         self.graph_tokens = {}
         self.position_type = 'normal'
+
         # Embedding + LN Embedding
         self.word_embeddings = nn.Embedding(config.vocab_size, self.embed_dim)
         self.word_embeddings_layernorm = LayerNorm(self.embed_dim, eps=config.layer_norm_epsilon)
@@ -793,10 +793,7 @@ class BloomModel(BloomPreTrainedModel):
                 )
 
             hidden_states = outputs[0]
-            if (
-                i != len(self.h) - 1
-                and hasattr(self, 'message_passing_type')
-            ):
+            if i != len(self.h) - 1 and hasattr(self, 'message_passing_type'):
                 hidden_states = self.graph_information_passing_layers[i](
                     hidden_states,
                     message_passing_dicts
