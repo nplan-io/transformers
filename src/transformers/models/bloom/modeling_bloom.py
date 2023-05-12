@@ -587,7 +587,6 @@ class BloomModel(BloomPreTrainedModel):
         self.graph_tokens = {}
         self.position_type = "normal"
         self.message_passing_type = "none"
-        self.dropout_layer = torch.nn.Dropout(p=0.5)
 
         # Embedding + LN Embedding
         self.word_embeddings = nn.Embedding(config.vocab_size, self.embed_dim)
