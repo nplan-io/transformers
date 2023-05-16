@@ -47,6 +47,8 @@ from ...utils import (
 from ...utils.model_parallel_utils import assert_device_map, get_device_map
 from .configuration_t5 import T5Config
 
+from .desequence_graph_ids import extract_edge_sequence, SequenceElement
+from .causal_message_passing import GatedGraphCrossAttentionLayer
 
 logger = logging.get_logger(__name__)
 
@@ -940,9 +942,18 @@ class T5Stack(T5PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.embed_tokens = new_embeddings
 
+    def init_graph_information_passing(self, gnn_type: str, element_type: str):
+        assert element_type in ['nodes', 'edges'], 'unsupported message passing type'
+        self.message_passing_type = element_type
+        self.graph_information_passing_layers = torch.nn.ModuleList([
+            GatedGraphCrossAttentionLayer(gnn_type, self.config.hidden_size)
+            for _ in range(self.config.num_layers - 1)
+        ])
+
     def forward(
         self,
         input_ids=None,
+        full_input_ids: Optional[torch.LongTensor] = None,
         attention_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
@@ -955,6 +966,7 @@ class T5Stack(T5PreTrainedModel):
         output_hidden_states=None,
         return_dict=None,
     ):
+        use_cache = None
         # Model parallel
         if self.model_parallel:
             torch.cuda.set_device(self.first_device)
@@ -1038,6 +1050,18 @@ class T5Stack(T5PreTrainedModel):
 
         hidden_states = self.dropout(inputs_embeds)
 
+        token_ids: torch.Tensor = full_input_ids if full_input_ids is not None else input_ids
+        if hasattr(self, 'graph_tokens'):
+            edge_sequences = [
+                extract_edge_sequence(t_ids.tolist(), self.graph_tokens) for t_ids in token_ids
+            ]
+            if hasattr(self, 'message_passing_type'):
+                if self.message_passing_type == 'nodes':
+                    get_matrices = GatedGraphCrossAttentionLayer.build_node_information_passing
+                else:
+                    get_matrices = GatedGraphCrossAttentionLayer.build_edge_information_passing
+                message_passing_dicts = get_matrices(edge_sequences, self.device)
+
         for i, (layer_module, past_key_value) in enumerate(zip(self.block, past_key_values)):
             layer_head_mask = head_mask[i]
             cross_attn_layer_head_mask = cross_attn_head_mask[i]
@@ -1104,6 +1128,11 @@ class T5Stack(T5PreTrainedModel):
 
             hidden_states, present_key_value_state = layer_outputs[:2]
 
+            if i != (self.config.num_layers - 1) and hasattr(self, 'message_passing_type'):
+                hidden_states = self.graph_information_passing_layers[i](
+                    hidden_states,
+                    message_passing_dicts
+                )
             # We share the position biases between the layers - the first layer store them
             # layer_outputs = hidden-states, key-value-states (self-attention position bias), (self-attention weights),
             # (cross-attention position bias), (cross-attention weights)
@@ -1780,13 +1809,13 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         encoder_outputs=None,
         **kwargs,
     ):
-        # cut decoder_input_ids if past is used
-        if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
+        # # cut decoder_input_ids if past is used
+        # if past_key_values is not None:
+        #     input_ids = input_ids[:, -1:]
 
         return {
             "decoder_input_ids": input_ids,
-            "past_key_values": past_key_values,
+            "past_key_values": None,
             "encoder_outputs": encoder_outputs,
             "attention_mask": attention_mask,
             "head_mask": head_mask,
