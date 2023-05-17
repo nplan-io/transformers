@@ -1052,6 +1052,8 @@ class T5Stack(T5PreTrainedModel):
 
         token_ids: torch.Tensor = full_input_ids if full_input_ids is not None else input_ids
         if hasattr(self, 'graph_tokens'):
+            input_ids[:, 0] = self.graph_tokens['gen_edge']
+            token_ids[:, 0] = self.graph_tokens['gen_edge']
             edge_sequences = [
                 extract_edge_sequence(t_ids.tolist(), self.graph_tokens) for t_ids in token_ids
             ]
