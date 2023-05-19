@@ -831,7 +831,7 @@ class BloomModel(BloomPreTrainedModel):
                 )
 
             hidden_states = outputs[0]
-            if i <= self.num_gnn_layers and hasattr(self, 'graph_tokens'):
+            if hasattr(self, 'graph_tokens') and i <= self.num_gnn_layers:
                 hidden_states = self.graph_information_passing_layers[i](
                     hidden_states,
                     message_passing_dicts
