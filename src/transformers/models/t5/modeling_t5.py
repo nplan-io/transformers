@@ -19,7 +19,7 @@ import copy
 import math
 import os
 import warnings
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -47,8 +47,8 @@ from ...utils import (
 from ...utils.model_parallel_utils import assert_device_map, get_device_map
 from .configuration_t5 import T5Config
 
-from .desequence_graph_ids import extract_edge_sequence, SequenceElement
-from .causal_message_passing import GatedGraphCrossAttentionLayer
+from ..processing_graphs_within_model.desequence_graph_ids import extract_edge_sequence
+from ..processing_graphs_within_model.causal_message_passing import GatedCausalMessagePassingLayer
 
 logger = logging.get_logger(__name__)
 
@@ -942,18 +942,30 @@ class T5Stack(T5PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.embed_tokens = new_embeddings
 
-    def init_graph_information_passing(self, gnn_type: str, element_type: str):
+    def init_graph_information_passing(
+        self,
+        gnn_type: str,
+        element_type: str,
+        graph_token_ids: Dict[str, int]
+    ):
+        """ Initializes a set of message passing layers to perform message passing of between
+            graph elements described in an input token id sequence
+        """
         assert element_type in ['nodes', 'edges'], 'unsupported message passing type'
         self.message_passing_type = element_type
+        self.graph_token_ids = graph_token_ids
+        self.num_gnn_layers = (
+            self.config.num_layers - 1
+            if hasattr(self.config, 'num_layers') else self.config.n_layer - 1
+        )
         self.graph_information_passing_layers = torch.nn.ModuleList([
-            GatedGraphCrossAttentionLayer(gnn_type, self.config.hidden_size)
-            for _ in range(self.config.num_layers - 1)
+            GatedCausalMessagePassingLayer(gnn_type, self.config.hidden_size)
+            for _ in range(self.num_gnn_layers)
         ])
 
     def forward(
         self,
         input_ids=None,
-        full_input_ids: Optional[torch.LongTensor] = None,
         attention_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
@@ -1050,19 +1062,17 @@ class T5Stack(T5PreTrainedModel):
 
         hidden_states = self.dropout(inputs_embeds)
 
-        token_ids: torch.Tensor = full_input_ids if full_input_ids is not None else input_ids
-        if hasattr(self, 'graph_tokens'):
-            input_ids[:, 0] = self.graph_tokens['gen_edge']
-            token_ids[:, 0] = self.graph_tokens['gen_edge']
+        if hasattr(self, "graph_tokens"):
+            assert input_ids.shape == attention_mask.shape
+            assert input_ids[0, 0] == self.graph_tokens['gen_edge'], "Incorrect stating token"
             edge_sequences = [
-                extract_edge_sequence(t_ids.tolist(), self.graph_tokens) for t_ids in token_ids
+                extract_edge_sequence(t_ids.tolist(), self.graph_tokens) for t_ids in input_ids
             ]
-            if hasattr(self, 'message_passing_type'):
-                if self.message_passing_type == 'nodes':
-                    get_matrices = GatedGraphCrossAttentionLayer.build_node_information_passing
-                else:
-                    get_matrices = GatedGraphCrossAttentionLayer.build_edge_information_passing
-                message_passing_dicts = get_matrices(edge_sequences, self.device)
+            if self.message_passing_type == 'nodes':
+                get_matrices = GatedCausalMessagePassingLayer.build_node_information_passing
+            else:
+                get_matrices = GatedCausalMessagePassingLayer.build_edge_information_passing
+            message_passing_dicts = get_matrices(edge_sequences, self.device)
 
         for i, (layer_module, past_key_value) in enumerate(zip(self.block, past_key_values)):
             layer_head_mask = head_mask[i]
@@ -1130,7 +1140,7 @@ class T5Stack(T5PreTrainedModel):
 
             hidden_states, present_key_value_state = layer_outputs[:2]
 
-            if i != (self.config.num_layers - 1) and hasattr(self, 'message_passing_type'):
+            if i <= self.num_gnn_layers and hasattr(self, 'graph_tokens'):
                 hidden_states = self.graph_information_passing_layers[i](
                     hidden_states,
                     message_passing_dicts
@@ -1811,10 +1821,6 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
         encoder_outputs=None,
         **kwargs,
     ):
-        # # cut decoder_input_ids if past is used
-        # if past_key_values is not None:
-        #     input_ids = input_ids[:, -1:]
-
         return {
             "decoder_input_ids": input_ids,
             "past_key_values": None,
@@ -1824,7 +1830,7 @@ class T5ForConditionalGeneration(T5PreTrainedModel):
             "decoder_head_mask": decoder_head_mask,
             "decoder_attention_mask": decoder_attention_mask,
             "cross_attn_head_mask": cross_attn_head_mask,
-            "use_cache": use_cache,
+            "use_cache": False,
         }
 
     def prepare_decoder_input_ids_from_labels(self, labels: torch.Tensor):
