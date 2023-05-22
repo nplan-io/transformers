@@ -694,7 +694,6 @@ class BloomModel(BloomPreTrainedModel):
             self.config.num_layers - 1
             if hasattr(self.config, 'num_layers') else self.config.n_layer - 1
         )
-        import pdb;pdb.set_trace()
         self.graph_information_passing_layers = torch.nn.ModuleList([
             GatedCausalMessagePassingLayer(gnn_type, self.config.hidden_size)
             for _ in range(self.num_gnn_layers)
