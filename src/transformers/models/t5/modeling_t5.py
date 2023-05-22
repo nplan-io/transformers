@@ -1140,7 +1140,7 @@ class T5Stack(T5PreTrainedModel):
 
             hidden_states, present_key_value_state = layer_outputs[:2]
 
-            if hasattr(self, 'graph_token_ids') and i <= self.num_gnn_layers:
+            if hasattr(self, 'graph_token_ids') and i < self.num_gnn_layers:
                 hidden_states = self.graph_information_passing_layers[i](
                     hidden_states,
                     message_passing_dicts
