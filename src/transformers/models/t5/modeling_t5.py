@@ -1064,7 +1064,6 @@ class T5Stack(T5PreTrainedModel):
 
         if hasattr(self, "graph_token_ids"):
             assert input_ids.shape == attention_mask.shape
-            assert input_ids[0, 0] == self.graph_tokens['gen_edge'], "Incorrect stating token"
             edge_sequences = [
                 extract_edge_sequence(t_ids.tolist(), self.graph_token_ids) for t_ids in input_ids
             ]
