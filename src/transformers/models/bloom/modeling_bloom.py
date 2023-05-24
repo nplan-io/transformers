@@ -780,10 +780,10 @@ class BloomModel(BloomPreTrainedModel):
         else:
             attention_mask = attention_mask.to(hidden_states.device)
 
-        if hasattr(self, "graph_tokens"):
+        if hasattr(self, "graph_token_ids"):
             assert input_ids.shape == attention_mask.shape
             edge_sequences = [
-                extract_edge_sequence(t_ids.tolist(), self.graph_tokens) for t_ids in input_ids
+                extract_edge_sequence(t_ids.tolist(), self.graph_token_ids) for t_ids in input_ids
             ]
             if self.message_passing_type == 'nodes':
                 get_matrices = GatedCausalMessagePassingLayer.build_node_information_passing
@@ -831,7 +831,7 @@ class BloomModel(BloomPreTrainedModel):
                 )
 
             hidden_states = outputs[0]
-            if i <= self.num_gnn_layers and hasattr(self, 'graph_tokens'):
+            if hasattr(self, 'graph_token_ids') and i < self.num_gnn_layers:
                 hidden_states = self.graph_information_passing_layers[i](
                     hidden_states,
                     message_passing_dicts

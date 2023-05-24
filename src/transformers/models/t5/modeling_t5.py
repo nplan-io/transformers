@@ -1062,11 +1062,10 @@ class T5Stack(T5PreTrainedModel):
 
         hidden_states = self.dropout(inputs_embeds)
 
-        if hasattr(self, "graph_tokens"):
+        if hasattr(self, "graph_token_ids"):
             assert input_ids.shape == attention_mask.shape
-            assert input_ids[0, 0] == self.graph_tokens['gen_edge'], "Incorrect stating token"
             edge_sequences = [
-                extract_edge_sequence(t_ids.tolist(), self.graph_tokens) for t_ids in input_ids
+                extract_edge_sequence(t_ids.tolist(), self.graph_token_ids) for t_ids in input_ids
             ]
             if self.message_passing_type == 'nodes':
                 get_matrices = GatedCausalMessagePassingLayer.build_node_information_passing
@@ -1140,7 +1139,7 @@ class T5Stack(T5PreTrainedModel):
 
             hidden_states, present_key_value_state = layer_outputs[:2]
 
-            if i <= self.num_gnn_layers and hasattr(self, 'graph_tokens'):
+            if hasattr(self, 'graph_token_ids') and i < self.num_gnn_layers:
                 hidden_states = self.graph_information_passing_layers[i](
                     hidden_states,
                     message_passing_dicts
