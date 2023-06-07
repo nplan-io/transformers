@@ -35,7 +35,11 @@ from ...modeling_outputs import (
 from ...modeling_utils import PreTrainedModel
 from ...utils import logging
 from .configuration_bloom import BloomConfig
-from ..processing_graphs_within_model.desequence_graph_ids import extract_edge_sequence
+from ..processing_graphs_within_model.desequence_graph_ids import (
+    add_descriptor_tokens,
+    extract_edge_sequence,
+    remove_descriptor_tokens
+)
 from ..processing_graphs_within_model.causal_message_passing import GatedCausalMessagePassingLayer
 
 logger = logging.get_logger(__name__)
@@ -718,6 +722,8 @@ class BloomModel(BloomPreTrainedModel):
         return_dict: Optional[bool] = None,
         **deprecated_arguments,
     ) -> Union[Tuple[torch.Tensor, ...], BaseModelOutputWithPastAndCrossAttentions]:
+        if hasattr(self, "graph_token_ids"):
+            input_ids, attention_mask = add_descriptor_tokens(input_ids, self.graph_token_ids)
         if deprecated_arguments.pop("position_ids", False) is not False:
             # `position_ids` could have been `torch.Tensor` or `None` so defaulting pop to `False` allows to detect if users were passing explicitly `None`
             warnings.warn(
@@ -752,9 +758,7 @@ class BloomModel(BloomPreTrainedModel):
         # attention_probs has shape batch_size x num_heads x N x N
         # head_mask has shape n_layer x batch x num_heads x N x N
         head_mask = self.get_head_mask(head_mask, self.config.n_layer)
-
-        if inputs_embeds is None:
-            inputs_embeds = self.word_embeddings(input_ids)
+        inputs_embeds = self.word_embeddings(input_ids)
 
         hidden_states = self.word_embeddings_layernorm(inputs_embeds)
 
@@ -842,7 +846,8 @@ class BloomModel(BloomPreTrainedModel):
 
             if output_attentions:
                 all_self_attentions = all_self_attentions + (outputs[2 if use_cache else 1],)
-
+        if hasattr(self, "graph_token_ids"):
+            hidden_states = remove_descriptor_tokens(input_ids, hidden_states, self.graph_token_ids['descriptor'])
         # Add last hidden state
         hidden_states = self.ln_f(hidden_states)
 
