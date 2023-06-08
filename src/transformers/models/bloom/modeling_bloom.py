@@ -722,8 +722,8 @@ class BloomModel(BloomPreTrainedModel):
         return_dict: Optional[bool] = None,
         **deprecated_arguments,
     ) -> Union[Tuple[torch.Tensor, ...], BaseModelOutputWithPastAndCrossAttentions]:
-        if hasattr(self, "graph_token_ids"):
-            input_ids, attention_mask = add_descriptor_tokens(input_ids, self.graph_token_ids)
+        # if hasattr(self, "graph_token_ids"):
+        #     input_ids, attention_mask = add_descriptor_tokens(input_ids, self.graph_token_ids)
         if deprecated_arguments.pop("position_ids", False) is not False:
             # `position_ids` could have been `torch.Tensor` or `None` so defaulting pop to `False` allows to detect if users were passing explicitly `None`
             warnings.warn(
@@ -846,8 +846,8 @@ class BloomModel(BloomPreTrainedModel):
 
             if output_attentions:
                 all_self_attentions = all_self_attentions + (outputs[2 if use_cache else 1],)
-        if hasattr(self, "graph_token_ids"):
-            hidden_states = remove_descriptor_tokens(input_ids, hidden_states, self.graph_token_ids['descriptor'])
+        # if hasattr(self, "graph_token_ids"):
+        #     hidden_states = remove_descriptor_tokens(input_ids, hidden_states, self.graph_token_ids['descriptor'])
         # Add last hidden state
         hidden_states = self.ln_f(hidden_states)
 

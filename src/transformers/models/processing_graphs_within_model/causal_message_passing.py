@@ -38,6 +38,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
     def __init__(self, gnn_type: str, embedding_size: int):
         super().__init__()
         self.gnn_layer = GNNLayerFactory[gnn_type].value(embedding_size, embedding_size)
+        self.gating_message_passing = torch.nn.Parameter(torch.zeros(1))
 
     def forward(
         self,
@@ -54,8 +55,12 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
                         element_embeddings,
                         message_passing_dict['edge_index']
                     )
-                new_t_embeddings[message_passing_dict['tokens2elements']] = element_embeddings
-            new_t_embeddings = t_embeddings + new_t_embeddings
+                reverse_mapping = message_passing_dict['elements2tokens']
+                if reverse_mapping[-1] == new_t_embeddings.shape[0]:
+                    reverse_mapping = reverse_mapping[:-1]
+                    element_embeddings = element_embeddings[:-1]
+                new_t_embeddings[reverse_mapping] = element_embeddings
+            new_t_embeddings = t_embeddings + torch.tanh(self.gating_message_passing) * new_t_embeddings
             new_token_embeddings.append(new_t_embeddings.unsqueeze(0))
         return torch.cat(new_token_embeddings, dim=0)
 
@@ -121,7 +126,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
                 node2edge_idxs=node2edge_idxs,
                 message_passing_dict=message_passing_dict
             )
-            for sequenced_edge in edge_sequence[:-1]:
+            for sequenced_edge in edge_sequence:
                 add_edge(sequenced_edge)
             # calculating adjacency matrix between edges (edges in this adjacency matrix always
             # point from edges earlier in the serialized version of the graph to edges later in
@@ -212,8 +217,8 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
             tokens2elements and elements2tokens, so that it is possible to map to elements
             and back
         """
-        if start_idx != end_idx:
-            message_passing_dict["tokens2elements"].append(start_idx - 1)
+        message_passing_dict["tokens2elements"].append(start_idx - 1)
+        message_passing_dict["elements2tokens"].append(start_idx)
 
     @staticmethod
     def to_torch(
