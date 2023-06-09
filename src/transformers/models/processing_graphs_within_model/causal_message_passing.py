@@ -127,6 +127,8 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
                 message_passing_dict=message_passing_dict
             )
             for sequenced_edge in edge_sequence:
+                if sequenced_edge[1] is None or sequenced_edge[2] is None:
+                    continue
                 add_edge(sequenced_edge)
             # calculating adjacency matrix between edges (edges in this adjacency matrix always
             # point from edges earlier in the serialized version of the graph to edges later in
