@@ -52,8 +52,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
                 element_embeddings = t_embeddings[message_passing_dict['tokens2elements']]
                 if message_passing_dict['edge_index'].numel() > 0:
                     element_embeddings = self.gnn_layer(
-                        element_embeddings,
-                        message_passing_dict['edge_index']
+                        element_embeddings, message_passing_dict['edge_index']
                     )
                 new_t_embeddings[message_passing_dict['elements2tokens']] = element_embeddings
             new_t_embeddings = t_embeddings + torch.tanh(self.gating_message_passing) * new_t_embeddings
@@ -61,7 +60,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
         return torch.cat(new_token_embeddings, dim=0)
 
     @classmethod
-    def build_node_information_passing(
+    def build_node_correspondence_information_passing(
         cls,
         edge_sequences: List[List[Tuple[SequenceElement, Optional[SequenceElement], Optional[SequenceElement]]]],
         device: torch.device
@@ -77,7 +76,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
                 message_passing_dicts.append(cls.to_torch(dict(message_passing_dict), device))
                 continue
             add_node = partial(
-                cls.add_node,
+                cls.add_node_correspondence,
                 end_idx=cls.get_sequence_end(edge_sequence),
                 last_occurence_idx=defaultdict(lambda: -1),
                 message_passing_dict=message_passing_dict
@@ -149,7 +148,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
         return end_idx
 
     @classmethod
-    def add_node(
+    def add_node_correspondence(
         cls,
         current_occurence: SequenceElement,
         end_idx: int,
@@ -172,12 +171,13 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
             message_passing_dict=message_passing_dict
         )
         curr_length = len(message_passing_dict[f"tokens2elements"])
-        if last_occurence_idx[current_occurence.ids] != -1 and curr_length > prev_length:
+        full_ids = current_occurence.graph_id + ("--node_ids--",) + current_occurence.ids
+        if last_occurence_idx[full_ids] != -1 and curr_length > prev_length:
             current_idx = len(message_passing_dict["tokens2elements"]) - 1
             message_passing_dict['edge_index'].append(
-                [last_occurence_idx[current_occurence.ids], current_idx]
+                [last_occurence_idx[full_ids], current_idx]
             )
-            last_occurence_idx[current_occurence.ids] = current_idx
+            last_occurence_idx[full_ids] = current_idx
 
     @classmethod
     def add_edge(
@@ -189,17 +189,19 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
     ):
         """ Adds an edge as element to pass information between in a serialized graph """
         pred_node, _, succ_node = sequenced_edge
-        prev_length = len(message_passing_dict[f"tokens2elements"])
+        prev_length = len(message_passing_dict["tokens2elements"])
         cls.add_element_for_information_passing(
             start_idx=succ_node.end_idx,
             end_idx=end_idx,
             message_passing_dict=message_passing_dict
         )
-        curr_length = len(message_passing_dict[f"tokens2elements"])
+        curr_length = len(message_passing_dict["tokens2elements"])
         if curr_length > prev_length:
             current_idx = len(message_passing_dict["tokens2elements"]) - 1
-            node2edge_idxs[pred_node.ids].append(current_idx)
-            node2edge_idxs[succ_node.ids].append(current_idx)
+            pred_ids = pred_node.graph_id + ("--node_ids--",) + pred_node.ids
+            node2edge_idxs[pred_ids].append(current_idx)
+            succ_ids = succ_node.graph_id + ("--node_ids--",) + succ_node.ids
+            node2edge_idxs[succ_ids].append(current_idx)
 
     @staticmethod
     def add_element_for_information_passing(

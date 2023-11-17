@@ -682,7 +682,7 @@ class BloomModel(BloomPreTrainedModel):
         """ Initializes a set of message passing layers to perform message passing of between
             graph elements described in an input token id sequence
         """
-        assert element_type in ['nodes', 'edges'], 'unsupported message passing type'
+        assert element_type in ['node_correspondence', 'edge'], 'unsupported message passing type'
         self.message_passing_type = element_type
         self.graph_token_ids = graph_token_ids
         self.num_gnn_layers = (
@@ -781,7 +781,7 @@ class BloomModel(BloomPreTrainedModel):
                 extract_edge_sequence(t_ids.tolist(), self.graph_token_ids) for t_ids in input_ids
             ]
             if self.message_passing_type == 'nodes':
-                get_matrices = GatedCausalMessagePassingLayer.build_node_information_passing
+                get_matrices = GatedCausalMessagePassingLayer.build_node_correspondence_information_passing
             else:
                 get_matrices = GatedCausalMessagePassingLayer.build_edge_information_passing
             message_passing_dicts = get_matrices(edge_sequences, self.device)

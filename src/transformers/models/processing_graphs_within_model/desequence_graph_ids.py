@@ -14,6 +14,7 @@ class SequenceElement:
     end_idx: int
     ids: Tuple[int]
     length: int
+    graph_id: Tuple[int]
 
 
 def extract_edge_sequence(
@@ -50,31 +51,65 @@ def _extract_graph_elements(
         if none is found, returns an empty list
     """
     sequence = []
-    prev_token_id, prev_idx, final_idx = None, -1, len(token_ids)
+    sog_idx, graph_id = None, None
+    prev_token_id, prev_idx, final_idx = None, -1, None
     for token_idx, token_id in enumerate(token_ids):
-        if token_id == graph_tokens['pred_node'] and prev_token_id is None:
+        if (
+            token_id == graph_tokens['sog']
+            and prev_token_id is None
+            and sog_idx is None
+        ):
+            sog_idx = token_idx
+        elif (
+            token_id == graph_tokens['pred_node']
+            and prev_token_id is None
+            and sog_idx is not None
+        ):
+            graph_id = tuple(token_ids[sog_idx:token_idx])[1:]
             prev_token_id, prev_idx = token_id, token_idx
         elif (
-            token_id in [graph_tokens['pred_node'], graph_tokens['edge'], graph_tokens['succ_node']]
+            token_id == graph_tokens['eog']
             and prev_token_id is not None
+            and graph_id is not None
         ):
             sequence.append(SequenceElement(
                 token=prev_token_id,
                 start_idx=prev_idx,
                 end_idx=token_idx,
                 ids=tuple(token_ids[prev_idx:token_idx])[1:],
-                length=token_idx - prev_idx
+                length=token_idx - prev_idx,
+                graph_id=graph_id
+            ))
+            sog_idx, graph_id = None, None
+            prev_token_id, prev_idx, final_idx = None, -1, len(token_ids)
+        elif (
+            token_id in [graph_tokens['pred_node'], graph_tokens['edge'], graph_tokens['succ_node']]
+            and prev_token_id is not None
+            and graph_id is not None
+        ):
+            sequence.append(SequenceElement(
+                token=prev_token_id,
+                start_idx=prev_idx,
+                end_idx=token_idx,
+                ids=tuple(token_ids[prev_idx:token_idx])[1:],
+                length=token_idx - prev_idx,
+                graph_id=graph_id
             ))
             prev_token_id, prev_idx = token_id, token_idx
-        elif token_id in [graph_tokens['eos'], graph_tokens['pad']] and prev_token_id is not None:
+        elif (
+            token_id in [graph_tokens['eos'], graph_tokens['pad']]
+            and prev_token_id is not None
+            and graph_id is not None
+        ):
             final_idx = token_idx
             break
-    if prev_token_id is not None:
+    if final_idx is not None:
         sequence.append(SequenceElement(
             token=prev_token_id,
             start_idx=prev_idx,
             end_idx=final_idx,
             ids=tuple(token_ids[prev_idx:final_idx])[1:],
-            length=final_idx - prev_idx
+            length=final_idx - prev_idx,
+            graph_id=graph_id
         ))
     return sequence
