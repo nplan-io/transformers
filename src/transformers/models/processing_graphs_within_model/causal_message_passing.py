@@ -171,7 +171,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
             message_passing_dict=message_passing_dict
         )
         curr_length = len(message_passing_dict[f"tokens2elements"])
-        full_ids = current_occurence.graph_id + current_occurence.ids
+        full_ids = current_occurence.graph_id + ("--node_ids--",) + current_occurence.ids
         if last_occurence_idx[full_ids] != -1 and curr_length > prev_length:
             current_idx = len(message_passing_dict["tokens2elements"]) - 1
             message_passing_dict['edge_index'].append(
