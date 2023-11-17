@@ -200,7 +200,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
             current_idx = len(message_passing_dict["tokens2elements"]) - 1
             pred_ids = pred_node.graph_id + ("--node_ids--",) + pred_node.ids
             node2edge_idxs[pred_ids].append(current_idx)
-            succ_ids = succ_node.graph_id + succ_node.ids
+            succ_ids = succ_node.graph_id + ("--node_ids--",) + succ_node.ids
             node2edge_idxs[succ_ids].append(current_idx)
 
     @staticmethod
