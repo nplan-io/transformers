@@ -60,7 +60,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
         return torch.cat(new_token_embeddings, dim=0)
 
     @classmethod
-    def build_node_information_passing(
+    def build_node_correspondence_information_passing(
         cls,
         edge_sequences: List[List[Tuple[SequenceElement, Optional[SequenceElement], Optional[SequenceElement]]]],
         device: torch.device
@@ -76,7 +76,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
                 message_passing_dicts.append(cls.to_torch(dict(message_passing_dict), device))
                 continue
             add_node = partial(
-                cls.add_node,
+                cls.add_node_correspondence,
                 end_idx=cls.get_sequence_end(edge_sequence),
                 last_occurence_idx=defaultdict(lambda: -1),
                 message_passing_dict=message_passing_dict
@@ -148,7 +148,7 @@ class GatedCausalMessagePassingLayer(torch.nn.Module):
         return end_idx
 
     @classmethod
-    def add_node(
+    def add_node_correspondence(
         cls,
         current_occurence: SequenceElement,
         end_idx: int,
