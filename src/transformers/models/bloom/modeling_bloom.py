@@ -16,7 +16,7 @@
 
 import math
 import warnings
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
@@ -36,6 +36,8 @@ from ...modeling_outputs import (
 from ...modeling_utils import PreTrainedModel
 from ...utils import logging
 from .configuration_bloom import BloomConfig
+from ..processing_graphs_within_model.desequence_graph_ids import extract_edge_sequence
+from ..processing_graphs_within_model.causal_message_passing import GatedCausalMessagePassingLayer
 
 
 logger = logging.get_logger(__name__)
@@ -612,6 +614,27 @@ class BloomModel(BloomPreTrainedModel):
     def set_input_embeddings(self, new_embeddings: torch.Tensor):
         self.word_embeddings = new_embeddings
 
+    def init_graph_information_passing(
+        self,
+        gnn_type: str,
+        element_type: str,
+        graph_token_ids: Dict[str, int]
+    ):
+        """ Initializes a set of message passing layers to perform message passing of between
+            graph elements described in an input token id sequence
+        """
+        assert element_type in ['node_correspondence', 'edge'], 'unsupported message passing type'
+        self.message_passing_type = element_type
+        self.graph_token_ids = graph_token_ids
+        self.num_gnn_layers = (
+            self.config.num_layers - 1
+            if hasattr(self.config, 'num_layers') else self.config.n_layer - 1
+        )
+        self.graph_information_passing_layers = torch.nn.ModuleList([
+            GatedCausalMessagePassingLayer(gnn_type, self.config.hidden_size)
+            for _ in range(self.num_gnn_layers)
+        ])
+
     @add_start_docstrings_to_model_forward(BLOOM_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
@@ -693,6 +716,17 @@ class BloomModel(BloomPreTrainedModel):
         else:
             attention_mask = attention_mask.to(hidden_states.device)
 
+        if hasattr(self, "graph_token_ids"):
+            assert input_ids.shape == attention_mask.shape
+            edge_sequences = [
+                extract_edge_sequence(t_ids.tolist(), self.graph_token_ids) for t_ids in input_ids
+            ]
+            if self.message_passing_type == 'nodes':
+                get_matrices = GatedCausalMessagePassingLayer.build_node_correspondence_information_passing
+            else:
+                get_matrices = GatedCausalMessagePassingLayer.build_edge_information_passing
+            message_passing_dicts = get_matrices(edge_sequences, self.device)
+
         alibi = self.build_alibi_tensor(attention_mask, self.num_heads, dtype=hidden_states.dtype)
 
         causal_mask = _prepare_4d_causal_attention_mask(
@@ -727,6 +761,12 @@ class BloomModel(BloomPreTrainedModel):
                     use_cache=use_cache,
                     output_attentions=output_attentions,
                     alibi=alibi,
+                )
+
+            if hasattr(self, 'graph_token_ids') and i < self.num_gnn_layers:
+                hidden_states = self.graph_information_passing_layers[i](
+                    hidden_states,
+                    message_passing_dicts
                 )
 
             hidden_states = outputs[0]
@@ -785,37 +825,12 @@ class BloomForCausalLM(BloomPreTrainedModel):
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> dict:
-        # only last tokens for input_ids if past is not None
-        if past_key_values is not None:
-            past_length = past_key_values[0][0].shape[2]
-
-            # Some generation methods already pass only the last input ID
-            if input_ids.shape[1] > past_length:
-                remove_prefix_length = past_length
-            else:
-                # Default to old behavior: keep only final ID
-                remove_prefix_length = input_ids.shape[1] - 1
-
-            input_ids = input_ids[:, remove_prefix_length:]
-
-            # the cache may be in the stardard format (e.g. in contrastive search), convert to bloom's format if needed
-            if past_key_values[0][0].shape[0] == input_ids.shape[0]:
-                past_key_values = self._convert_to_bloom_cache(past_key_values)
-
-        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
-            model_inputs = {"inputs_embeds": inputs_embeds}
-        else:
-            model_inputs = {"input_ids": input_ids}
-
-        model_inputs.update(
-            {
-                "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
-                "attention_mask": attention_mask,
-            }
-        )
-        return model_inputs
+        return {
+            "input_ids": input_ids,
+            "past_key_values": None,
+            "use_cache": False,
+            "attention_mask": attention_mask
+        }
 
     @add_start_docstrings_to_model_forward(BLOOM_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
