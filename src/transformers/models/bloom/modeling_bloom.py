@@ -604,7 +604,7 @@ class BloomModel(BloomPreTrainedModel):
         self.post_init()
 
     def build_alibi_tensor(self, attention_mask: torch.Tensor, num_heads: int, dtype: torch.dtype) -> torch.Tensor:
-        return build_alibi_tensor(attention_mask, num_heads, dtype)
+        return build_alibi_tensor(attention_mask, num_heads, dtype, self.graph_tokens, self.position_encoding_type)
 
     def get_input_embeddings(self):
         return self.word_embeddings
@@ -621,6 +621,7 @@ class BloomModel(BloomPreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
+        full_input_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Tuple[Tuple[torch.Tensor, torch.Tensor], ...]] = None,
         attention_mask: Optional[torch.Tensor] = None,
         head_mask: Optional[torch.LongTensor] = None,
@@ -785,6 +786,7 @@ class BloomForCausalLM(BloomPreTrainedModel):
         inputs_embeds: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> dict:
+<<<<<<< HEAD
         # only last tokens for input_ids if past is not None
         if past_key_values is not None:
             past_length = past_key_values[0][0].shape[2]
@@ -797,6 +799,12 @@ class BloomForCausalLM(BloomPreTrainedModel):
                 remove_prefix_length = input_ids.shape[1] - 1
 
             input_ids = input_ids[:, remove_prefix_length:]
+=======
+        # only last token for input_ids if past is not None
+        truncated_input_ids = input_ids
+        if past_key_values:
+            truncated_input_ids = input_ids[:, -1].unsqueeze(-1)
+>>>>>>> f3647f663 (not debugged code)
 
             # the cache may be in the stardard format (e.g. in contrastive search), convert to bloom's format if needed
             if past_key_values[0][0].shape[0] == input_ids.shape[0]:
@@ -806,13 +814,14 @@ class BloomForCausalLM(BloomPreTrainedModel):
         if inputs_embeds is not None and past_key_values is None:
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
-            model_inputs = {"input_ids": input_ids}
+            model_inputs = {"input_ids": truncated_input_ids}
 
         model_inputs.update(
             {
                 "past_key_values": past_key_values,
                 "use_cache": kwargs.get("use_cache"),
                 "attention_mask": attention_mask,
+                "full_input_ids": input_ids,
             }
         )
         return model_inputs
@@ -831,6 +840,7 @@ class BloomForCausalLM(BloomPreTrainedModel):
         head_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         labels: Optional[torch.Tensor] = None,
+        full_input_ids: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
